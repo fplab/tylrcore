@@ -1,4 +1,5 @@
 Require Import Coq.Lists.List.
+Set Printing Matching.
 
 Module ListFrame.
   Definition t (A:Type) := (list A * list A) % type.
@@ -8,86 +9,86 @@ Module ListFrame.
     rev prefix ++ subj ++ suffix.
 End ListFrame.
 
-Inductive sort : Type :=
-| Pat : sort
-| Exp : sort.
+Module Sort.
+  Inductive t : Type :=
+  | Pat : t
+  | Exp : t.
+End Sort.
+
+Module Direction.
+  Inductive t : Type :=
+  | L : t
+  | R : t.
+
+  Definition toggle (d : t) :=
+    match d with
+    | L => R
+    | R => L
+    end.
+
+  Definition choose {A : Type} (d : t) (p : A * A) :=
+    let (l, r) := p in
+    match d with
+    | L => l
+    | R => r
+    end.
+End Direction.
+
+Module Tip.
+  Definition t : Type := (Direction.t * Sort.t) % type.
+End Tip.
 
 Module Term.
-  Inductive t : sort -> Type :=
+  Inductive t : Sort.t -> Type :=
   | Op_hole : forall s, t s
   | Op_text : forall s, t s
   | Bin_hole : forall s, t s -> t s -> t s
   | Bin_text : forall s, t s -> t s -> t s
   | Paren : forall s, t s -> t s
-  | Lam : t Pat -> t Exp -> t Exp
-  | Let : t Pat -> t Exp -> t Exp -> t Exp.
-  (* Inductive pat : Type :=
-  | Op_hole_p : pat
-  | Op_text_p : pat
-  | Bin_hole_p : pat -> pat -> pat
-  | Bin_text_p : pat -> pat -> pat
-  | Paren_p : pat -> pat.
-  Inductive exp : Type :=
-  | Op_hole_e : exp
-  | Op_text_e : exp
-  | Bin_hole_e : exp -> exp -> exp
-  | Bin_text_e : exp -> exp -> exp
-  | Paren_e : exp -> exp
-  | Lam : pat -> exp -> exp
-  | Let : pat -> exp -> exp -> exp. *)
+  | Lam : t Sort.Pat -> t Sort.Exp -> t Sort.Exp
+  | Let : t Sort.Pat -> t Sort.Exp -> t Sort.Exp -> t Sort.Exp.
 End Term.
 
 Module Tile.
-  Inductive t : sort -> Type :=
+  Inductive t : Sort.t -> Type :=
   | Op_hole : forall s, t s
   | Op_text : forall s, t s
   | Bin_hole : forall s, t s
   | Bin_text : forall s, t s
   | Paren : forall s, list (t s) -> t s
-  | Lam : list (t Pat) -> t Exp
-  | Let : list (t Pat) -> list (t Exp) -> t Exp.
-  (* Inductive pat : Type :=
-  | Op_hole_p : pat
-  | Op_text_p : pat
-  | Bin_hole_p : pat
-  | Bin_text_p : pat
-  | Paren_p : list pat -> pat.
-  Inductive exp : Type :=
-  | Op_hole_e : exp
-  | Op_text_e : exp
-  | Bin_hole_e : exp
-  | Bin_text_e : exp
-  | Paren_e : list exp -> exp
-  | Lam : list pat -> exp
-  | Let : list pat -> list exp -> exp.
-  Inductive t : Type :=
-  | Pat : pat -> t
-  | Exp : exp -> t. *)
+  | Lam : list (t Sort.Pat) -> t Sort.Exp
+  | Let : list (t Sort.Pat) -> list (t Sort.Exp) -> t Sort.Exp.
+
+  Definition tip {s:Sort.t} (d : Direction.t) (tile : t s) : Tip.t :=
+    match (tile) with
+    | Op_hole s | Op_text s | Paren s _ => (d, s)
+    | Bin_hole s | Bin_text s => (Direction.toggle d, s)
+    | Lam _
+    | Let _ _ => (Direction.L, Sort.Exp)
+    end.
 End Tile.
 
 Module Shard.
-  Inductive t : sort -> Type :=
+  Inductive t : Sort.t -> Type :=
   | Paren_l : forall s, t s
   | Paren_r : forall s, t s
-  | Lam_lam : t Exp
-  | Lam_dot : t Exp
-  | Let_let : t Exp
-  | Let_eq : t Exp
-  | Let_in : t Exp.
-  (* Inductive pat : Type :=
-  | Paren_l_p : pat
-  | Paren_r_p : pat.
-  Inductive exp : Type :=
-  | Paren_l_e : exp
-  | Paren_r_e : exp
-  | Lam_lam : exp
-  | Lam_dot : exp
-  | Let_let : exp
-  | Let_eq : exp
-  | Let_in : exp.
-  Inductive t : Type :=
-  | Pat : pat -> t
-  | Exp : exp -> t. *)
+  | Lam_lam : t Sort.Exp
+  | Lam_dot : t Sort.Exp
+  | Let_let : t Sort.Exp
+  | Let_eq : t Sort.Exp
+  | Let_in : t Sort.Exp.
+
+  Definition tip {s:Sort.t} (d : Direction.t) (shard : t s) : Tip.t :=
+    let choose := Direction.choose d in
+    match shard with
+    | Paren_l s => (Direction.L, s)
+    | Paren_r s => (Direction.R, s)
+    | Lam_lam
+    | Let_let => (Direction.L, choose (Sort.Exp, Sort.Pat))
+    | Lam_dot
+    | Let_eq => (Direction.toggle d, choose (Sort.Pat, Sort.Exp))
+    | Let_in => (Direction.toggle d, Sort.Exp)
+    end.
 End Shard.
 
 Module Piece.
@@ -104,7 +105,7 @@ Module Segment.
   Definition t := list Piece.t.
   Definition affixes := ListFrame.t Piece.t.
 
-  Definition of_tiles {s:sort} (tiles : list (Tile.t s)) : t :=
+  Definition of_tiles {s:Sort.t} (tiles : list (Tile.t s)) : t :=
     map (Piece.Tile s) tiles.
 
   (* TODO *)
@@ -122,21 +123,32 @@ Module Segment.
 End Segment.
 
 Module Frame.
-  Inductive seq : sort -> Type :=
-  | Seq : forall s, ListFrame.t (Tile.t s) -> t s -> seq s
-  with t : sort -> Type :=
-  | Root : t Exp
-  | Paren_body : forall s, seq s -> t s
-  | Lam_pat : seq Exp -> t Pat
-  | Let_pat : list (Tile.t Exp) -> seq Exp -> t Pat
-  | Let_def : list (Tile.t Pat) -> seq Exp -> t Exp.
+  Inductive seq : Sort.t -> Type :=
+  | Seq : forall s, ListFrame.t (Tile.t s) -> tile s -> seq s
+  with tile : Sort.t -> Type :=
+  | Root : tile Sort.Exp
+  | Paren_body : forall s, seq s -> tile s
+  | Lam_pat : seq Sort.Exp -> tile Sort.Pat
+  | Let_pat : list (Tile.t Sort.Exp) -> seq Sort.Exp -> tile Sort.Pat
+  | Let_def : list (Tile.t Sort.Pat) -> seq Sort.Exp -> tile Sort.Exp.
+
+  Inductive t : Type :=
+  | F : forall s, tile s -> t.
+
+  (* Fixpoint fill (segment : Segment.t) (frame : t) : option Segment.t :=
+    let F s tile := frame in
+    match tile with
+    | Root => Some segment
+    | Paren_body s' seq =>
+      let Seq _ affixes tile := seq in *)
+
 
   (* TODO do I need this forall s? couldn't get implicit arg to work *)
-  Inductive fills : forall s, Segment.t -> t s -> Segment.t -> Prop :=
-  | fills_root : forall segment, fills Exp segment Root segment
+  Inductive fills : Segment.t -> t -> Segment.t -> Prop :=
+  | fills_root : forall segment, fills segment (F Sort.Exp Root) segment
   | fills_Paren_body : forall s body affixes frame filled,
-      fills s (Segment.of_tiles (ListFrame.fill (Tile.Paren s body::nil) affixes)) frame filled
-      -> fills s (Segment.of_tiles body) (Paren_body s (Seq s affixes frame)) filled.
+      fills (Segment.of_tiles (ListFrame.fill (Tile.Paren s body::nil) affixes)) (F s frame) filled
+      -> fills (Segment.of_tiles body) (F s (Paren_body s (Seq s affixes frame))) filled.
   (* TODO *)
 End Frame.
 
@@ -159,23 +171,53 @@ End Subject.
 
 Module Zipper.
   (* TODO is this forall s right? *)
-  Definition t (s : sort) := (Subject.t * Frame.t s) % type.
+  Definition t := (Subject.t * Frame.t) % type.
 
   (* TODO *)
-  Inductive erases: forall s, t s -> Segment.t -> Prop :=
-  | er : erases Exp (Subject.Pointing (nil, nil), Frame.Root) nil.
+  Inductive erases: t -> Segment.t -> Prop :=
+  | er : erases (Subject.Pointing (nil, nil), Frame.F Sort.Exp Frame.Root) nil.
 End Zipper.
 
-Module Direction.
-  Inductive t : Type :=
-  | L : t
-  | R : t.
-End Direction.
+Module Disassembly.
+  Definition step_disassemble_piece (c : Piece.t) : option Segment.t :=
+    match c with
+    | Piece.Shard _ _
+    | Piece.Tile _ (Tile.Op_hole _ | Tile.Op_text _ | Tile.Bin_hole _ | Tile.Bin_text _) => None
+    | Piece.Tile _ (Tile.Paren s body) =>
+      let p := Piece.Shard s in
+      Some (((p (Shard.Paren_l s)) :: Segment.of_tiles body) ++ (p (Shard.Paren_r s) :: nil))
+    | Piece.Tile _ (Tile.Lam pat) =>
+      let p := Piece.Shard Sort.Exp in
+      Some ((p Shard.Lam_lam :: Segment.of_tiles pat) ++ (p Shard.Lam_dot :: nil))
+    | Piece.Tile _ (Tile.Let pat def) =>
+      let p := Piece.Shard Sort.Exp in
+      Some(
+        (p Shard.Let_let :: Segment.of_tiles pat)
+        ++ (p Shard.Let_eq :: Segment.of_tiles def)
+        ++ (p Shard.Let_in :: nil)
+      )
+    end.
 
-Module Holes.
+  (* non-deterministic *)
+  Inductive step_disassemble_segment : Segment.t -> Segment.t -> Prop :=
+  | disassemble_hd : forall piece step_disassembled segment,
+      step_disassemble_piece piece = Some step_disassembled
+      -> step_disassemble_segment (piece :: segment) (step_disassembled ++ segment)
+  | disassemble_tl : forall piece segment step_disassembled,
+      step_disassemble_segment segment step_disassembled
+      -> step_disassemble_segment (piece :: segment) (piece :: step_disassembled).
+
+  (* Definition step_disassemble_frame () *)
+
+End Disassembly.
+
+Module Connected.
+  (* Inductive connected : (Tip.t * Tip.t) -> Segment.t -> Prop :=
+  | *)
+
   (* TODO *)
-  Definition fix_holes (s : sort) (affixes : Segment.affixes) := affixes.
-End Holes.
+  Definition fix_ (s : Sort.t) (affixes : Segment.affixes) := affixes.
+End Connected.
 
 Module Action.
   Inductive t : Type :=
@@ -184,48 +226,47 @@ Module Action.
   | Insert : forall s, Tile.t s -> t
   | Remove : t.
 
-  Inductive move_pointing : forall (s1 s2 : sort), (Zipper.t s1) -> Direction.t -> (Zipper.t s2) -> Prop :=
-  | p_move_r_atomic : forall s prefix piece suffix frame,
+  Inductive move_pointing : Zipper.t -> Direction.t -> Zipper.t -> Prop :=
+  | p_move_r_atomic : forall prefix piece suffix frame,
       Piece.atomic piece
       -> move_pointing
-          s s
           (Subject.Pointing (prefix, (piece::suffix)), frame)
           Direction.R
           (Subject.Pointing ((piece::prefix), suffix), frame).
   (* TODO *)
 
-  Inductive move_selecting : forall (s1 s2 : sort), (Zipper.t s1) -> Direction.t -> (Zipper.t s2) -> Prop :=
-  | todo_selecting : forall s d zipper, move_selecting s s zipper d zipper.
+  Inductive move_selecting : Zipper.t -> Direction.t -> Zipper.t -> Prop :=
+  | todo_selecting : forall d zipper, move_selecting zipper d zipper.
 
-  Inductive move_restructuring : forall (s1 s2 : sort), (Zipper.t s1) -> Direction.t -> (Zipper.t s2) -> Prop :=
-  | todo_restructuring : forall s d zipper, move_restructuring s s zipper d zipper.
+  Inductive move_restructuring : Zipper.t -> Direction.t -> Zipper.t -> Prop :=
+  | todo_restructuring : forall d zipper, move_restructuring zipper d zipper.
 
-  Inductive perform : forall (s1 s2 : sort), (Zipper.t s1) -> Action.t -> (Zipper.t s2) -> Prop :=
-  | move : forall s1 s2 d affixes frame zipper,
-      move_pointing s1 s2 (Subject.Pointing affixes, frame) d zipper
-      -> perform s1 s2 (Subject.Pointing affixes, frame) (Move d) zipper
-  | insert : forall s tile prefix suffix frame,
-      perform s s
-        (Subject.Pointing (prefix, suffix), frame)
+  Inductive perform : Zipper.t -> Action.t -> Zipper.t -> Prop :=
+  | move : forall d affixes frame zipper,
+      move_pointing (Subject.Pointing affixes, frame) d zipper
+      -> perform (Subject.Pointing affixes, frame) (Move d) zipper
+  | insert : forall s tile prefix suffix tile_frame,
+      perform
+        (Subject.Pointing (prefix, suffix), Frame.F s tile_frame)
         (Insert s tile)
-        (Subject.Pointing (Holes.fix_holes s (prefix, Piece.Tile s tile::suffix)), frame)
-  | start_selecting : forall s affixes frame,
-      perform s s
+        (Subject.Pointing (Connected.fix_ s (prefix, Piece.Tile s tile::suffix)), Frame.F s tile_frame)
+  | start_selecting : forall affixes frame,
+      perform
         (Subject.Pointing affixes, frame)
         Mark
         (Subject.Selecting nil affixes, frame)
-  | select : forall d s1 s2 selection affixes frame zipper,
-      move_selecting s1 s2 (Subject.Selecting selection affixes, frame) d zipper
-      -> perform s1 s2 (Subject.Selecting selection affixes, frame) (Move d) zipper
-  | pick_up : forall s selection affixes frame,
+  | select : forall d selection affixes frame zipper,
+      move_selecting (Subject.Selecting selection affixes, frame) d zipper
+      -> perform (Subject.Selecting selection affixes, frame) (Move d) zipper
+  | pick_up : forall s selection affixes tile_frame,
       Segment.same_sort_capped selection
-      -> perform s s
-            (Subject.Selecting selection affixes, frame)
+      -> perform
+            (Subject.Selecting selection affixes, Frame.F s tile_frame)
             Mark
-            (Subject.Restructuring selection (Holes.fix_holes s affixes), frame)
-  | restructure : forall s1 s2 d selection affixes frame zipper,
-      move_restructuring s1 s2 (Subject.Restructuring selection affixes, frame) d zipper
-      -> perform s1 s2 (Subject.Restructuring selection affixes, frame) (Move d) zipper.
+            (Subject.Restructuring selection (Connected.fix_ s affixes), Frame.F s tile_frame)
+  | restructure : forall d selection affixes frame zipper,
+      move_restructuring (Subject.Restructuring selection affixes, frame) d zipper
+      -> perform (Subject.Restructuring selection affixes, frame) (Move d) zipper.
 
 End Action.
 
