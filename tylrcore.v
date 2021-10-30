@@ -96,6 +96,12 @@ Module Piece.
   | Tile : forall s, Tile.t s -> t
   | Shard : forall s, Shard.t s -> t.
 
+  Definition tip (d : Direction.t) (piece : t) : Tip.t :=
+    match piece with
+    | Tile _ tile => Tile.tip d tile
+    | Shard _ shard => Shard.tip d shard
+    end.
+
   (* TODO *)
   Inductive atomic : t -> Prop :=
   | todo : forall c, atomic c.
@@ -140,15 +146,15 @@ Module Frame.
     match tile with
     | Root => Some segment
     | Paren_body s' seq =>
+      match Segment.
       let Seq _ affixes tile := seq in *)
-
 
   (* TODO do I need this forall s? couldn't get implicit arg to work *)
   Inductive fills : Segment.t -> t -> Segment.t -> Prop :=
   | fills_root : forall segment, fills segment (F Sort.Exp Root) segment
-  | fills_Paren_body : forall s body affixes frame filled,
-      fills (Segment.of_tiles (ListFrame.fill (Tile.Paren s body::nil) affixes)) (F s frame) filled
-      -> fills (Segment.of_tiles body) (F s (Paren_body s (Seq s affixes frame))) filled.
+  | fills_Paren_body : forall s body affixes tile_frame filled,
+      fills (Segment.of_tiles (ListFrame.fill (Tile.Paren s body::nil) affixes)) (F s tile_frame) filled
+      -> fills (Segment.of_tiles body) (F s (Paren_body s (Seq s affixes tile_frame))) filled.
   (* TODO *)
 End Frame.
 
@@ -212,8 +218,17 @@ Module Disassembly.
 End Disassembly.
 
 Module Connected.
-  (* Inductive connected : (Tip.t * Tip.t) -> Segment.t -> Prop :=
-  | *)
+  Inductive connected : (Tip.t * Tip.t) -> Segment.t -> Prop :=
+  | connected_nil : forall tip, connected (tip, tip) nil
+  | connected_cons_atomic : forall piece segment tip,
+      Disassembly.step_disassemble_piece piece = None
+      -> connected (Piece.tip Direction.R piece, tip) segment
+      -> connected (Piece.tip Direction.L piece, tip) (piece :: segment)
+  | connected_cons_disassembles : forall tip1 piece segment1 tip2 segment2 tip3,
+      Disassembly.step_disassemble_piece piece = Some segment1
+      -> connected (tip1, tip2) segment1
+      -> connected (tip2, tip3) segment2
+      -> connected (tip1, tip3) (segment1 ++ segment2).
 
   (* TODO *)
   Definition fix_ (s : Sort.t) (affixes : Segment.affixes) := affixes.
@@ -267,6 +282,5 @@ Module Action.
   | restructure : forall d selection affixes frame zipper,
       move_restructuring (Subject.Restructuring selection affixes, frame) d zipper
       -> perform (Subject.Restructuring selection affixes, frame) (Move d) zipper.
-
 End Action.
 
