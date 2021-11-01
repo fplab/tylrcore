@@ -36,6 +36,8 @@ End Direction.
 
 Module Tip.
   Definition t : Type := (Direction.t * Sort.t) % type.
+
+  Definition sort (tip : t) : Sort.t := let (_, s) := tip in s.
 End Tip.
 
 Module Term.
@@ -114,11 +116,22 @@ Module Segment.
   Definition of_tiles {s:Sort.t} (tiles : list (Tile.t s)) : t :=
     map (Piece.Tile s) tiles.
 
+  Definition tip (d : Direction.t) (segment : t) : Tip.t :=
+    let dummy_piece := Piece.Tile Sort.Exp (Tile.Op_hole Sort.Exp) in
+    match d with
+    | Direction.L => Piece.tip d (hd dummy_piece segment)
+    | Direction.R => Piece.tip d (last segment dummy_piece)
+    end.
+
   (* TODO *)
-  Definition is_intact (segment: t) : bool := true.
+  Definition intact (segment: t) : Prop := True.
   (* Inductive intact : t -> Prop :=
   | intact_nil : intact nil
   | intact_cons : forall sort tile pieces, intact pieces -> intact (Piece.Tile sort tile::pieces). *)
+  Definition cracked (segment : t) : Prop := True.
+
+  Definition intact_or_cracked : forall segment, { intact segment } + { cracked segment }.
+  Admitted.
 
   Inductive same_sort_capped : t -> Prop :=
   | todo : forall segment, same_sort_capped segment.
@@ -126,6 +139,9 @@ Module Segment.
   (* TODO *)
   Definition assemble (segment: t) : t :=
     segment.
+
+  Definition filter_tiles (s : Sort.t) (segment : t) : t.
+  Admitted.
 End Segment.
 
 Module Frame.
@@ -169,7 +185,7 @@ Module Subject.
     | Pointing affixes => ListFrame.fill nil affixes
     | Selecting selection affixes => Segment.assemble (ListFrame.fill selection affixes)
     | Restructuring selection affixes =>
-      if Segment.is_intact selection
+      if Segment.intact_or_cracked selection
       then ListFrame.fill nil affixes
       else Segment.assemble (ListFrame.fill selection affixes)
     end.
@@ -216,6 +232,14 @@ Module Disassembly.
   (* Definition step_disassemble_frame () *)
 
 End Disassembly.
+
+Module Assembly.
+  Definition assemble_segment : Segment.t -> Segment.t.
+  Admitted.
+
+  Definition assemble_zipper : Zipper.t -> Zipper.t.
+  Admitted.
+End Assembly.
 
 Module Connected.
   Inductive connected : (Tip.t * Tip.t) -> Segment.t -> Prop :=
@@ -281,6 +305,21 @@ Module Action.
             (Subject.Restructuring selection (Connected.fix_ s affixes), Frame.F s tile_frame)
   | restructure : forall d selection affixes frame zipper,
       move_restructuring (Subject.Restructuring selection affixes, frame) d zipper
-      -> perform (Subject.Restructuring selection affixes, frame) (Move d) zipper.
+      -> perform (Subject.Restructuring selection affixes, frame) (Move d) zipper
+  | put_down : forall s selection prefix suffix prefix' suffix' tile_frame,
+      (Tip.sort (Segment.tip Direction.L selection) = s)
+      -> Connected.fix_ s (prefix, selection ++ suffix) = (prefix', suffix')
+      -> perform
+          (Subject.Restructuring selection (prefix, suffix), Frame.F s tile_frame)
+          Mark
+          (Assembly.assemble_zipper
+            (Subject.Pointing (prefix', Assembly.assemble_segment suffix'), Frame.F s tile_frame))
+  | remove : forall s selection prefix suffix prefix' suffix' tile_frame,
+      Connected.fix_ s (Segment.filter_tiles s prefix, Segment.filter_tiles s suffix) = (prefix', suffix')
+      -> perform
+          (Subject.Restructuring selection (prefix, suffix), Frame.F s tile_frame)
+          Remove
+          (Subject.Pointing (prefix, suffix), Frame.F s tile_frame)
+    .
 End Action.
 
