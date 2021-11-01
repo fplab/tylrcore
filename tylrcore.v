@@ -61,6 +61,48 @@ Module Tile.
   | Lam : list (t Sort.Pat) -> t Sort.Exp
   | Let : list (t Sort.Pat) -> list (t Sort.Exp) -> t Sort.Exp.
 
+  Section t_ind'.
+    Variable P_t : forall s, t s -> Prop.
+    Variable P_seq : forall s, list (t s) -> Prop.
+
+    Variable P_seq_nil : forall s, P_seq s nil.
+    Variable P_seq_cons : forall s hd tl, P_t s hd -> P_seq s tl -> P_seq s (hd :: tl).
+
+    Variable P_Op_hole : forall s, P_t s (Op_hole s).
+    Variable P_Op_text : forall s, P_t s (Op_text s).
+    Variable P_Bin_hole : forall s, P_t s (Bin_hole s).
+    Variable P_Bin_text : forall s, P_t s (Bin_text s).
+    Variable P_Paren : forall s body, P_seq s body -> P_t s (Paren s body).
+    Variable P_Lam : forall pat, P_seq Sort.Pat pat -> P_t Sort.Exp (Lam pat).
+    Variable P_Let : forall pat def,
+      P_seq Sort.Pat pat -> P_seq Sort.Exp def -> P_t Sort.Exp (Let pat def).
+
+    Fixpoint t_ind' {s} (tile : t s) : P_t s tile.
+    refine (
+      match tile with
+      | Op_hole _ => _
+      | Op_text _ => _
+      | Bin_hole _ => _
+      | Bin_text _ => _
+      | Paren _ body => _
+      | Lam pat => _
+      | Let pat def => _
+      end
+    ).
+    - refine (P_Op_hole t).
+    - refine (P_Op_text t).
+    - refine (P_Bin_hole t).
+    - refine (P_Bin_text t).
+    - refine (P_Paren t body _).
+      induction body; auto.
+    - refine (P_Lam _ _).
+      induction pat; auto.
+    - refine (P_Let _ _ _ _).
+      induction pat; auto.
+      induction def; auto.
+    Qed.
+  End t_ind'.
+
   Definition tip {s:Sort.t} (d : Direction.t) (tile : t s) : Tip.t :=
     match (tile) with
     | Op_hole s | Op_text s | Paren s _ => (d, s)
@@ -242,17 +284,49 @@ Module Assembly.
 End Assembly.
 
 Module Connected.
-  Inductive connected : (Tip.t * Tip.t) -> Segment.t -> Prop :=
-  | connected_nil : forall tip, connected (tip, tip) nil
+  Inductive connected : Tip.t -> Segment.t -> Tip.t -> Prop :=
+  | connected_nil : forall tip, connected tip nil tip
   | connected_cons_atomic : forall piece segment tip,
       Disassembly.step_disassemble_piece piece = None
-      -> connected (Piece.tip Direction.R piece, tip) segment
-      -> connected (Piece.tip Direction.L piece, tip) (piece :: segment)
-  | connected_cons_disassembles : forall tip1 piece segment1 tip2 segment2 tip3,
-      Disassembly.step_disassemble_piece piece = Some segment1
-      -> connected (tip1, tip2) segment1
-      -> connected (tip2, tip3) segment2
-      -> connected (tip1, tip3) (segment1 ++ segment2).
+      -> connected (Piece.tip Direction.R piece) segment tip
+      -> connected (Piece.tip Direction.L piece) (piece :: segment) tip
+  | connected_cons_disassembles : forall tip_l piece segment' segment tip_r,
+      Disassembly.step_disassemble_piece piece = Some segment'
+      -> connected tip_l (segment' ++ segment) tip_r
+      -> connected tip_l (piece :: segment) tip_r.
+
+  Lemma connected_parts :
+    forall tip0 segment1 segment2 tip2,
+      connected tip0 (segment1 ++ segment2) tip2
+      -> exists tip1, connected tip0 segment1 tip1 /\ connected tip1 segment2 tip2.
+  Proof.
+    induction segment1.
+    - intros. exists tip0. split.
+      + apply connected_nil.
+      + rewrite app_nil_l in H. assumption.
+    - Admitted.
+
+  (* Lemma connected_parts :
+    forall tip_l piece segment tip_r,
+      connected tip_l (piece::segment) tip_r
+      -> exists tip, connected tip_l (piece::nil) tip /\ connected tip segment tip_r *)
+
+  Lemma cons_app_singleton {A : Type} :
+    forall (x : A) (l : list A), x :: l = (x :: nil) ++ l.
+  Proof.
+  Admitted.
+
+  Lemma connected_transitive :
+    forall segment1 segment2 tip0 tip1 tip2,
+      connected tip0 segment1 tip1
+      -> connected tip1 segment2 tip2
+      -> connected tip0 (segment1 ++ segment2) tip2.
+  Proof.
+    induction segment1.
+    - intros. rewrite app_nil_l. inversion H. assumption.
+    - intros. rewrite cons_app_singleton in H. apply connected_parts in H.
+  Admitted.
+
 
   (* TODO *)
   Definition fix_ (s : Sort.t) (affixes : Segment.affixes) := affixes.
