@@ -1,4 +1,5 @@
 Require Import Coq.Lists.List.
+Require Import Coq.Relations.Relation_Operators.
 Set Printing Matching.
 
 Module ListFrame.
@@ -40,16 +41,28 @@ Module Tip.
   Definition sort (tip : t) : Sort.t := let (_, s) := tip in s.
 End Tip.
 
-Module Term.
+Module Shard.
   Inductive t : Sort.t -> Type :=
-  | Op_hole : forall s, t s
-  | Op_text : forall s, t s
-  | Bin_hole : forall s, t s -> t s -> t s
-  | Bin_text : forall s, t s -> t s -> t s
-  | Paren : forall s, t s -> t s
-  | Lam : t Sort.Pat -> t Sort.Exp -> t Sort.Exp
-  | Let : t Sort.Pat -> t Sort.Exp -> t Sort.Exp -> t Sort.Exp.
-End Term.
+  | Paren_l : forall s, t s
+  | Paren_r : forall s, t s
+  | Lam_lam : t Sort.Exp
+  | Lam_dot : t Sort.Exp
+  | Let_let : t Sort.Exp
+  | Let_eq : t Sort.Exp
+  | Let_in : t Sort.Exp.
+
+  Definition tip {s:Sort.t} (d : Direction.t) (shard : t s) : Tip.t :=
+    let choose := Direction.choose d in
+    match shard with
+    | Paren_l s => (Direction.L, s)
+    | Paren_r s => (Direction.R, s)
+    | Lam_lam
+    | Let_let => (Direction.L, choose (Sort.Exp, Sort.Pat))
+    | Lam_dot
+    | Let_eq => (Direction.toggle d, choose (Sort.Pat, Sort.Exp))
+    | Let_in => (Direction.toggle d, Sort.Exp)
+    end.
+End Shard.
 
 Module Tile.
   Inductive t : Sort.t -> Type :=
@@ -112,28 +125,28 @@ Module Tile.
     end.
 End Tile.
 
-Module Shard.
+Module Term.
   Inductive t : Sort.t -> Type :=
-  | Paren_l : forall s, t s
-  | Paren_r : forall s, t s
-  | Lam_lam : t Sort.Exp
-  | Lam_dot : t Sort.Exp
-  | Let_let : t Sort.Exp
-  | Let_eq : t Sort.Exp
-  | Let_in : t Sort.Exp.
+  | Op_hole : forall s, t s
+  | Op_text : forall s, t s
+  | Bin_hole : forall s, t s -> t s -> t s
+  | Bin_text : forall s, t s -> t s -> t s
+  | Paren : forall s, t s -> t s
+  | Lam : t Sort.Pat -> t Sort.Exp -> t Sort.Exp
+  | Let : t Sort.Pat -> t Sort.Exp -> t Sort.Exp -> t Sort.Exp.
 
-  Definition tip {s:Sort.t} (d : Direction.t) (shard : t s) : Tip.t :=
-    let choose := Direction.choose d in
-    match shard with
-    | Paren_l s => (Direction.L, s)
-    | Paren_r s => (Direction.R, s)
-    | Lam_lam
-    | Let_let => (Direction.L, choose (Sort.Exp, Sort.Pat))
-    | Lam_dot
-    | Let_eq => (Direction.toggle d, choose (Sort.Pat, Sort.Exp))
-    | Let_in => (Direction.toggle d, Sort.Exp)
+  Fixpoint disassemble {sort} (term : Term.t sort) : list (Tile.t sort) :=
+    match term with
+    | Term.Op_hole s => Tile.Op_hole s :: nil
+    | Term.Op_text s => Tile.Op_text s :: nil
+    | Term.Bin_hole s l r => disassemble l ++ Tile.Bin_hole s :: (disassemble r)
+    | Term.Bin_text s l r => disassemble r ++ Tile.Bin_text s :: (disassemble r)
+    | Term.Paren s body => Tile.Paren s (disassemble body) :: nil
+    | Term.Lam pat body => Tile.Lam (disassemble pat) :: (disassemble body)
+    | Term.Let pat def body =>
+      Tile.Let (disassemble pat) (disassemble def) :: (disassemble body)
     end.
-End Shard.
+End Term.
 
 Module Piece.
   Inductive t : Type :=
@@ -175,12 +188,42 @@ Module Segment.
   Definition intact_or_cracked : forall segment, { intact segment } + { cracked segment }.
   Admitted.
 
-  Inductive same_sort_capped : t -> Prop :=
-  | todo : forall segment, same_sort_capped segment.
+  Definition same_sort_capped : t -> Prop.
+  Admitted.
+
+  Definition step_disassemble_piece (c : Piece.t) : option Segment.t :=
+    match c with
+    | Piece.Shard _ _
+    | Piece.Tile _ (Tile.Op_hole _ | Tile.Op_text _ | Tile.Bin_hole _ | Tile.Bin_text _) => None
+    | Piece.Tile _ (Tile.Paren s body) =>
+      let p := Piece.Shard s in
+      Some (((p (Shard.Paren_l s)) :: Segment.of_tiles body) ++ (p (Shard.Paren_r s) :: nil))
+    | Piece.Tile _ (Tile.Lam pat) =>
+      let p := Piece.Shard Sort.Exp in
+      Some ((p Shard.Lam_lam :: Segment.of_tiles pat) ++ (p Shard.Lam_dot :: nil))
+    | Piece.Tile _ (Tile.Let pat def) =>
+      let p := Piece.Shard Sort.Exp in
+      Some(
+        (p Shard.Let_let :: Segment.of_tiles pat)
+        ++ (p Shard.Let_eq :: Segment.of_tiles def)
+        ++ (p Shard.Let_in :: nil)
+      )
+    end.
+
+  (* non-deterministic *)
+  Inductive step_disassembles : t -> t -> Prop :=
+  | disassemble_hd : forall piece step_disassembled segment,
+      step_disassemble_piece piece = Some step_disassembled
+      -> step_disassembles (piece :: segment) (step_disassembled ++ segment)
+  | disassemble_tl : forall piece segment step_disassembled,
+      step_disassembles segment step_disassembled
+      -> step_disassembles (piece :: segment) (piece :: step_disassembled).
+
+  Definition disassembles : t -> t -> Prop :=
+    clos_refl_trans Segment.t step_disassembles.
 
   (* TODO *)
-  Definition assemble (segment: t) : t :=
-    segment.
+  Definition reassemble (segment: t) : t. Admitted.
 
   Definition filter_tiles (s : Sort.t) (segment : t) : t.
   Admitted.
@@ -225,73 +268,40 @@ Module Subject.
   Definition erase (subj: t) : Segment.t :=
     match subj with
     | Pointing affixes => ListFrame.fill nil affixes
-    | Selecting selection affixes => Segment.assemble (ListFrame.fill selection affixes)
+    | Selecting selection affixes => Segment.reassemble (ListFrame.fill selection affixes)
     | Restructuring selection affixes =>
       if Segment.intact_or_cracked selection
       then ListFrame.fill nil affixes
-      else Segment.assemble (ListFrame.fill selection affixes)
+      else Segment.reassemble (ListFrame.fill selection affixes)
     end.
 End Subject.
 
 Module Zipper.
-  (* TODO is this forall s right? *)
   Definition t := (Subject.t * Frame.t) % type.
 
   (* TODO *)
-  Inductive erases: t -> Segment.t -> Prop :=
-  | er : erases (Subject.Pointing (nil, nil), Frame.F Sort.Exp Frame.Root) nil.
+  Definition erases: t -> Segment.t -> Prop. Admitted.
+  (* | er : erases (Subject.Pointing (nil, nil), Frame.F Sort.Exp Frame.Root) nil. *)
+
+  Definition step_disassemble_frame : Frame.t -> option t. Admitted.
+
+  Definition step_disassembles : t -> t -> Prop. Admitted.
+
+  Definition disassembles : t -> t -> Prop :=
+    clos_refl_trans t step_disassembles.
+
+  Definition reassemble : t -> t. Admitted.
 End Zipper.
-
-Module Disassembly.
-  Definition step_disassemble_piece (c : Piece.t) : option Segment.t :=
-    match c with
-    | Piece.Shard _ _
-    | Piece.Tile _ (Tile.Op_hole _ | Tile.Op_text _ | Tile.Bin_hole _ | Tile.Bin_text _) => None
-    | Piece.Tile _ (Tile.Paren s body) =>
-      let p := Piece.Shard s in
-      Some (((p (Shard.Paren_l s)) :: Segment.of_tiles body) ++ (p (Shard.Paren_r s) :: nil))
-    | Piece.Tile _ (Tile.Lam pat) =>
-      let p := Piece.Shard Sort.Exp in
-      Some ((p Shard.Lam_lam :: Segment.of_tiles pat) ++ (p Shard.Lam_dot :: nil))
-    | Piece.Tile _ (Tile.Let pat def) =>
-      let p := Piece.Shard Sort.Exp in
-      Some(
-        (p Shard.Let_let :: Segment.of_tiles pat)
-        ++ (p Shard.Let_eq :: Segment.of_tiles def)
-        ++ (p Shard.Let_in :: nil)
-      )
-    end.
-
-  (* non-deterministic *)
-  Inductive step_disassemble_segment : Segment.t -> Segment.t -> Prop :=
-  | disassemble_hd : forall piece step_disassembled segment,
-      step_disassemble_piece piece = Some step_disassembled
-      -> step_disassemble_segment (piece :: segment) (step_disassembled ++ segment)
-  | disassemble_tl : forall piece segment step_disassembled,
-      step_disassemble_segment segment step_disassembled
-      -> step_disassemble_segment (piece :: segment) (piece :: step_disassembled).
-
-  (* Definition step_disassemble_frame () *)
-
-End Disassembly.
-
-Module Assembly.
-  Definition assemble_segment : Segment.t -> Segment.t.
-  Admitted.
-
-  Definition assemble_zipper : Zipper.t -> Zipper.t.
-  Admitted.
-End Assembly.
 
 Module Connected.
   Inductive connected : Tip.t -> Segment.t -> Tip.t -> Prop :=
   | connected_nil : forall tip, connected tip nil tip
   | connected_cons_atomic : forall piece segment tip,
-      Disassembly.step_disassemble_piece piece = None
+      Segment.step_disassemble_piece piece = None
       -> connected (Piece.tip Direction.R piece) segment tip
       -> connected (Piece.tip Direction.L piece) (piece :: segment) tip
   | connected_cons_disassembles : forall tip_l piece segment' segment tip_r,
-      Disassembly.step_disassemble_piece piece = Some segment'
+      Segment.step_disassemble_piece piece = Some segment'
       -> connected tip_l (segment' ++ segment) tip_r
       -> connected tip_l (piece :: segment) tip_r.
 
@@ -331,6 +341,19 @@ Module Connected.
   (* TODO *)
   Definition fix_ (s : Sort.t) (affixes : Segment.affixes) := affixes.
 End Connected.
+
+Module Parsability.
+  Definition parsable (s : Sort.t) (segment : Segment.t) : Prop :=
+    exists term : Term.t s,
+      Segment.of_tiles (Term.disassemble term) = Segment.reassemble segment.
+
+  Definition convex (s : Sort.t) (segment : Segment.t) : Prop :=
+    Connected.connected (Direction.L, s) segment (Direction.R, s).
+
+  Theorem parsable_iff_convex :
+    forall s segment, parsable s segment <-> convex s segment.
+  Admitted.
+End Parsability.
 
 Module Action.
   Inductive t : Type :=
@@ -386,14 +409,13 @@ Module Action.
       -> perform
           (Subject.Restructuring selection (prefix, suffix), Frame.F s tile_frame)
           Mark
-          (Assembly.assemble_zipper
-            (Subject.Pointing (prefix', Assembly.assemble_segment suffix'), Frame.F s tile_frame))
+          (Zipper.reassemble
+            (Subject.Pointing (prefix', Segment.reassemble suffix'), Frame.F s tile_frame))
   | remove : forall s selection prefix suffix prefix' suffix' tile_frame,
       Connected.fix_ s (Segment.filter_tiles s prefix, Segment.filter_tiles s suffix) = (prefix', suffix')
       -> perform
           (Subject.Restructuring selection (prefix, suffix), Frame.F s tile_frame)
           Remove
-          (Subject.Pointing (prefix, suffix), Frame.F s tile_frame)
-    .
+          (Subject.Pointing (prefix, suffix), Frame.F s tile_frame).
 End Action.
 
